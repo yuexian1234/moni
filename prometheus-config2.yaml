@@ -1,0 +1,76 @@
+global:
+    scrape_interval: 15s
+    scrape_timeout: 15s
+    evaluation_interval: 15s
+# rule_files:
+#     - "/etc/prometheus-rules/*.yml"
+scrape_configs:
+- job_name: 'local'
+  static_configs: 
+  - targets: ["192.168.91.145:8080"]
+- job_name: 'cadvisor'
+  kubernetes_sd_configs:
+  - role: node
+  relabel_configs:
+  - action: replace
+    source_labels: [__address__]
+    regex: '(.*):10250'
+    replacement: '${1}:8080'
+    target_label: __address__
+  - source_labels: [__address__]
+    # target label is the one you want to create
+    # 添加集群label, 不同集群需要修改此处的值
+    target_label: bec_cluster
+    replacement: "tx-cls-gdgz-01"
+
+# - job_name: nodes
+#   honor_timestamps: true
+#   metrics_path: /metrics
+#   scheme: http
+#   kubernetes_sd_configs:
+#   - role: pod
+#   bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+#   tls_config:
+#     insecure_skip_verify: true
+#   relabel_configs:
+#   - source_labels: [__meta_kubernetes_pod_ip]
+#     separator: ;
+#     regex: (.*)
+#     target_label: __address__
+#     replacement: ${1}:9100
+#     action: replace
+#   # - source_labels: [__meta_kubernetes_pod_name]
+#   #   separator: ;
+#   #   regex: (.*)
+#   #   target_label: pod_name
+#   #   replacement: ${1}
+#   #   action: replace
+#   - source_labels: [__address__]
+#     # target label is the one you want to create
+#     # 添加集群label, 不同集群需要修改此处的值
+#     target_label: bec_cluster
+#     replacement: "tx-cls-gdgz-01"
+
+
+# - job_name: kubernetes-nodes-cadvisor
+#   honor_timestamps: true
+#   scrape_interval: 30s
+#   scrape_timeout: 10s
+#   metrics_path: /metrics
+#   scheme: https
+#   kubernetes_sd_configs:
+#   - role: node
+#   bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+#   tls_config:
+#     ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+#     insecure_skip_verify: true
+#   relabel_configs:
+#   - separator: ;
+#     regex: __meta_kubernetes_node_label_(.+)
+#     replacement: $1
+#     action: labelmap
+#   - separator: ;
+#     regex: (.*)
+#     target_label: __metrics_path__
+#     replacement: /metrics/cadvisor
+#     action: replace

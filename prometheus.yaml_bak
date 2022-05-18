@@ -1,0 +1,199 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: prometheus-k8s
+    namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+    name: prometheus
+roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: prometheus-k8s
+  namespace: monitoring
+
+---
+
+kind: ConfigMap
+metadata:
+    name: prometheus-core
+    namespace: monitoring
+apiVersion: v1
+data:
+    prometheus.yaml: |
+        global:
+            scrape_interval: 15s
+            scrape_timeout: 15s
+            evaluation_interval: 15s
+        rule_files:
+            - "/etc/prometheus-rules/*.yml"
+        scrape_configs:
+        - job_name: 'local'
+          static_configs: 
+           - targets: ["192.168.91.145:8080"]
+        - job_name: 'kubernetes-apiservers'
+            kubernetes_sd_configs:
+            - role: endpoints
+            scheme: https
+            tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            relabel_configs:
+            - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+                action: keep
+                regex: default;kubernetes;https
+
+
+---
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+    name: prometheus-rules
+    namespace: monitoring
+data:
+    node-up.yml: |
+        groups:
+        - name: server_rules
+            rules:
+            - alert: 机器宕机
+                expr: up{component="node-exporter"} != 1
+                for: 1m
+                labels:
+                    severity: "warning"
+                    instance: "{{ $labels.instance }}"
+                annotations:
+                    summary: "机器 {{ $labels.instance }} 处于down的状态"
+                    description: "{{ $labels.instance }} of job {{ $labels.job }} 
+                    已经处于down状态超过1分钟，请及时处理"
+    cpu-usage.yml: |
+        groups:
+        - name: cpu_rules
+            rules:
+            - alert: cpu 剩余量过低
+                expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=
+                    "idle"}[5m])) * 100) > 85
+                for: 1m
+                labels:
+                    severity: "warning"
+                    instance: "{{ $labels.instance }}"
+                annotations:
+                    summary: "机器 {{ $labels.instance }} cpu 已用超过设定值"
+                    description: "{{ $labels.instance }} CPU 用量已超过 85% (current 
+                                 value is: {{ $value }})，请及时处理。"     
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+    name: prometheus
+    namespace: monitoring
+    labels:
+        app: prometheus
+        component: core
+    annotations:
+        prometheus.io/scrape: 'true'
+spec:
+    ports:
+        - port: 9090
+          targetPort: 9090
+          protocol: TCP
+          name: webui
+    selector:
+        app: prometheus
+        component: core
+
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: prometheus-core
+    namespace: monitoring
+    labels:
+        app: prometheus
+        component: core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+
+    spec:
+      serviceAccountName: prometheus-k8s
+      nodeSelector:
+          monitoring: "true"
+      containers:
+      - name: prometheus
+        image: quay.io/prometheus/prometheus:v2.11.0
+        args:
+              - '--storage.tsdb.retention=15d'
+              - '--config.file=/etc/prometheus/prometheus.yaml'
+              - '--storage.tsdb.path=/home/prometheus_data'
+              - '--web.enable-lifecycle' 
+        ports:
+        - name: webui
+          containerPort: 9090
+        resources:
+            requests:
+                cpu: 100m
+                memory: 100M
+            limits:
+                cpu: 1000m
+                memory: 1000M
+        securityContext:
+            privileged: true
+        volumeMounts:
+        - name: data
+          mountPath: /home/prometheus_data
+        - name: config-volume
+          mountPath: /etc/prometheus
+        - name: rules-volume
+          mountPath: /etc/prometheus-rules
+        - name: time
+          mountPath: /etc/localtime
+     
+      volumes:
+        - name: data
+          hostPath:
+              path: /root/data
+        - name: config-volume
+          configMap:
+              name: prometheus-core
+        - name: rules-volume
+          configMap:
+              name: prometheus-rules
+        - name: time
+          hostPath:
+              path: /etc/localtime
+
