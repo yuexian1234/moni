@@ -1,0 +1,55 @@
+groups:
+- name: job:cpu_core_total
+  rules:
+  - expr: sum(container_spec_cpu_quota / container_spec_cpu_period) BY (container_env_app_id,container_env_pod_name,container_env_deploy_env,container_env_pod_container,job,
+      pro, container_label_owners,cluster,instance_name, pod, namespace, container,container_label_io_kubernetes_pod_name)
+    record: job:cpu_core_total
+- name: job:cpu_used_total
+  rules:
+  - expr: sum(rate(container_cpu_usage_seconds_total[5m])) BY (container_env_app_id,container_env_pod_name,container_env_deploy_env,container_env_pod_container,job,
+      pro, container_label_owners,cluster,instance_name, pod, namespace, container,container_label_io_kubernetes_pod_name)
+      * 100
+    record: job:cpu_used_total
+- name: job:mem_limit_bytes
+  rules:
+  - expr: sum(container_spec_memory_limit_bytes) BY (container_env_app_id,container_env_pod_name,
+      container_env_deploy_env,container_env_pod_container,job, pro, container_label_owners,cluster,instance_name,
+      pod, namespace, container, container,container_label_io_kubernetes_pod_name)
+    record: job:mem_limit_bytes
+- name: job:mem_used_bytes
+  rules:
+  - expr: sum(container_memory_usage_bytes) BY (container_env_app_id,container_env_pod_name,
+      container_env_deploy_env,container_env_pod_container,job, pro, container_label_owners,cluster,instance_name,
+      pod, namespace, container, container,container_label_io_kubernetes_pod_name) - sum(container_memory_cache) BY (container_env_app_id,container_env_pod_name,
+      container_env_deploy_env,container_env_pod_container,job, pro, container_label_owners,cluster,instance_name,
+      pod, namespace, container, container,container_label_io_kubernetes_pod_name)
+    record: job:mem_used_bytes
+- name: job:mem_used
+  rules:
+  - expr: label_replace((job:mem_used_bytes / (job:mem_limit_bytes{}>0)) * 100, "owners",
+      "$1", "container_label_owners", "(.*)") <= 100
+    record: job:mem_used
+- name: job:cpu_used
+  rules:
+  - expr: label_replace((job:cpu_used_total / job:cpu_core_total) < 100, "owners",
+      "$1", "container_label_owners", "(.*)")
+    record: job:cpu_used
+- name: job:mem_used_with_cache
+  rules:
+  - expr: |-
+      100*(container_memory_usage_bytes{} /
+      container_spec_memory_limit_bytes{}) <= 100
+    record: job:mem_used_with_cache
+- name: job:network_in
+  rules:
+  - expr: |-
+      label_replace(sum by (container_label_app_id, container_label_env, container_label_io_kubernetes_pod_name,cluster,pool,product, pod, namespace, container, container,container_label_io_kubernetes_pod_name) (rate(container_network_receive_bytes_total{}[2m])), "container_env_app_id", "$1", "container_label_app_id",
+              "(.*)")
+    record: job:network_in
+- name: job:network_out
+  rules:
+  - expr: |-
+      label_replace(sum by (container_label_app_id, container_label_env, container_label_io_kubernetes_pod_name,cluster,pool,product, pod, namespace, container, container,container_label_io_kubernetes_pod_name) (rate(container_network_transmit_bytes_total{}[2m])), "container_env_app_id", "$1", "container_label_app_id",
+            "(.*)")
+    record: job:network_out
+
